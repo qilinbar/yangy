@@ -1,0 +1,118 @@
+#!/bin/sh
+
+CONFIG=/etc/config/netopt
+LOGGER_TAG="netopt-apply"
+
+# 检查配置文件是否存在
+if [ ! -f "$CONFIG" ]; then
+    logger -t $LOGGER_TAG "配置文件不存在: $CONFIG"
+    exit 0
+fi
+
+# 读取配置
+get_config() {
+    uci -q get netopt.@netopt[0].$1 | tr -d "'"
+}
+
+eee_val=$(get_config eee || echo "0")
+rpsxps_val=$(get_config rpsxps || echo "0")
+interfaces=$(get_config interfaces || echo "")
+
+logger -t $LOGGER_TAG "应用配置: eee=$eee_val, rpsxps=$rpsxps_val, interfaces=$interfaces"
+
+# 如果没有选择接口，直接退出
+if [ -z "$interfaces" ]; then
+    logger -t $LOGGER_TAG "未配置网卡，跳过处理"
+    exit 0
+fi
+
+# 处理每个网卡
+for iface in $interfaces; do
+    # 检查接口是否存在
+    if [ ! -d "/sys/class/net/$iface" ]; then
+        logger -t $LOGGER_TAG "接口不存在: $iface"
+        continue
+    fi
+
+    logger -t $LOGGER_TAG "处理接口: $iface"
+
+    # 处理 EEE (修复：不选择时开启EEE)
+    if ethtool --show-eee "$iface" >/dev/null 2>&1; then
+        if [ "$eee_val" = "1" ]; then
+            # 关闭EEE，忽略内核警告
+            ethtool --set-eee "$iface" eee off 2>/dev/null
+            logger -t $LOGGER_TAG "关闭EEE: $iface"
+        else
+            # 开启EEE，忽略内核警告
+            ethtool --set-eee "$iface" eee on 2>/dev/null
+            logger -t $LOGGER_TAG "开启EEE: $iface"
+        fi
+    else
+        logger -t $LOGGER_TAG "接口不支持EEE: $iface"
+    fi
+
+    # 处理 RPS/XPS (修复：处理TX队列)
+    if [ "$rpsxps_val" = "1" ]; then
+        # 获取CPU核心数(兼容busybox)
+        cpu_count=$(nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo 1)
+        
+        # 计算CPU掩码
+        mask=$(printf "%x" $(( (1 << cpu_count) - 1 )) 2>/dev/null || echo "1")
+        
+        # 设置RPS和XPS
+        queues_path="/sys/class/net/$iface/queues"
+        if [ -d "$queues_path" ]; then
+            for queue_path in "$queues_path"/*; do
+                queue=$(basename "$queue_path")
+                
+                if [ -d "$queue_path" ]; then
+                    # 处理RX队列 (RPS)
+                    if echo "$queue" | grep -q "^rx-"; then
+                        rps_cpus="$queue_path/rps_cpus"
+                        if [ -w "$rps_cpus" ]; then
+                            echo "$mask" > "$rps_cpus" 2>/dev/null
+                            logger -t $LOGGER_TAG "设置 $iface/$queue RPS -> 0x$mask"
+                        fi
+                    
+                    # 处理TX队列 (XPS)
+                    elif echo "$queue" | grep -q "^tx-"; then
+                        xps_cpus="$queue_path/xps_cpus"
+                        if [ -w "$xps_cpus" ]; then
+                            echo "$mask" > "$xps_cpus" 2>/dev/null
+                            logger -t $LOGGER_TAG "设置 $iface/$queue XPS -> 0x$mask"
+                        fi
+                    fi
+                fi
+            done
+        fi
+    else
+        # 如果RPS/XPS被禁用，恢复默认设置
+        queues_path="/sys/class/net/$iface/queues"
+        if [ -d "$queues_path" ]; then
+            for queue_path in "$queues_path"/*; do
+                queue=$(basename "$queue_path")
+                
+                if [ -d "$queue_path" ]; then
+                    # 恢复RX队列
+                    if echo "$queue" | grep -q "^rx-"; then
+                        rps_cpus="$queue_path/rps_cpus"
+                        if [ -w "$rps_cpus" ]; then
+                            echo "0" > "$rps_cpus" 2>/dev/null
+                            logger -t $LOGGER_TAG "恢复 $iface/$queue RPS -> 默认"
+                        fi
+                    
+                    # 恢复TX队列
+                    elif echo "$queue" | grep -q "^tx-"; then
+                        xps_cpus="$queue_path/xps_cpus"
+                        if [ -w "$xps_cpus" ]; then
+                            echo "0" > "$xps_cpus" 2>/dev/null
+                            logger -t $LOGGER_TAG "恢复 $iface/$queue XPS -> 默认"
+                        fi
+                    fi
+                fi
+            done
+        fi
+    fi
+done
+
+logger -t $LOGGER_TAG "配置应用完成"
