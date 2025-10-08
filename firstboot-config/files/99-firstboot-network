@@ -1,0 +1,30 @@
+#!/bin/sh
+
+FIRSTBOOT_MARKER="/etc/firstboot-done"
+
+# 如果已经执行过，直接退出
+[ -f "$FIRSTBOOT_MARKER" ] && {
+    echo "Firstboot network configuration already applied"
+    exit 0
+}
+
+# 备份原配置（可选）
+cp /etc/config/network /etc/config/network.backup.firstboot
+
+# 设置网络配置
+echo "Applying firstboot network configuration..."
+uci set network.lan.ipaddr='192.168.1.2'
+uci set network.lan.dns='192.168.1.1'
+
+# 提交配置
+uci commit network
+
+# 创建标记文件
+touch "$FIRSTBOOT_MARKER"
+
+# 写入日志
+logger -t firstboot "Network configured: IP=192.168.1.2, DNS=192.168.1.1"
+
+echo "Firstboot network configuration completed successfully"
+
+exit 0
