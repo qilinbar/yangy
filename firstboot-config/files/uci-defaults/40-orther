@@ -1,0 +1,6 @@
+#!/bin/sh
+LOGTAG="firstboot-others"
+# 以后加策略，比如默认防火墙规则、OpenClash 配置等
+logger -t "$LOGTAG" "no additional rules yet"
+exit 0
+

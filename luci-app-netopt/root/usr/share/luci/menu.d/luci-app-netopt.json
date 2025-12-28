@@ -1,0 +1,11 @@
+{
+  "admin/services/netopt": {
+    "title": "网卡优化",
+    "order": 60,
+    "action": {
+      "type": "view",
+      "path": "netopt/overview"
+    }
+  }
+}
+

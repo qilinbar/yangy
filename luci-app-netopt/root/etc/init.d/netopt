@@ -1,62 +1,42 @@
 #!/bin/sh /etc/rc.common
 
-START=99
-STOP=10
+START=99          # 启动优先级，99 表示网络启动后运行
+STOP=10           # 停止优先级（可选）
 
-USE_PROCD=1
+start() {
+    config_load netopt
+    config_get enable config enable
+    if [ "$enable" = "1" ]; then
+        config_get eee config eee '0'
+        config_get rpsxps config rpsxps '0'
+        config_get interfaces config interfaces
 
-CONFIG=/etc/config/netopt
-LOGGER_TAG="netopt-init"
+        # 处理 interfaces 为 list 类型，拼接成空格分隔字符串
+        local iface_list=""
+        for iface in $interfaces; do
+            iface_list="$iface_list $iface"
+        done
+        iface_list="${iface_list# }"  # 去掉开头空格
 
-start_service() {
-    # 先读取配置看看
-    logger -t $LOGGER_TAG "读取配置文件: $CONFIG"
-    
-    if [ -f "$CONFIG" ]; then
-        logger -t $LOGGER_TAG "配置文件内容:"
-        cat "$CONFIG" | logger -t $LOGGER_TAG
-        
-        local interfaces=$(uci -q get netopt.netopt.interfaces 2>/dev/null)
-        logger -t $LOGGER_TAG "读取到的接口: '$interfaces'"
-    fi
-    
-    # 等待配置中的接口
-    local count=0
-    while [ $count -lt 30 ]; do
-        local interfaces=$(uci -q get netopt.netopt.interfaces 2>/dev/null | tr -d "'")
-        if [ -n "$interfaces" ]; then
-            local all_ready=1
-            for iface in $interfaces; do
-                if [ ! -e "/sys/class/net/$iface" ]; then
-                    all_ready=0
-                    logger -t $LOGGER_TAG "接口 $iface 不存在"
-                    break
-                fi
-            done
-            
-            if [ $all_ready -eq 1 ]; then
-                logger -t $LOGGER_TAG "所有接口就绪，启动netopt"
-                procd_open_instance
-                procd_set_param command /usr/bin/netopt-apply
-                procd_set_param stdout 1
-                procd_set_param stderr 1
-                procd_close_instance
-                return 0
-            fi
+        logger -t netopt "Boot optimization enabled. Applying settings..."
+
+        # 调用 rpcd 后端方法（你的 shell 脚本）
+        ubus call netopt apply_optimization "{\"eee\":\"$eee\",\"rpsxps\":\"$rpsxps\",\"interfaces\":\"$iface_list\"}"
+        if [ $? -eq 0 ]; then
+            logger -t netopt "Boot optimization applied successfully"
+        else
+            logger -t netopt "Boot optimization failed"
         fi
-        
-        sleep 2
-        count=$((count + 1))
-    done
-    
-    logger -t $LOGGER_TAG "超时，强制启动netopt"
-    procd_open_instance
-    procd_set_param command /usr/bin/netopt-apply
-    procd_set_param stdout 1
-    procd_set_param stderr 1
-    procd_close_instance
+    else
+        logger -t netopt "Boot optimization disabled (enable=0)"
+    fi
 }
 
 stop() {
-    logger -t $LOGGER_TAG "netopt服务停止"
+    # 可选：停止时不做任何事，或者清理临时状态
+    logger -t netopt "Netopt service stopped"
+}
+
+boot() {
+    start
 }

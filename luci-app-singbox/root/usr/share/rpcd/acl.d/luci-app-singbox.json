@@ -1,0 +1,30 @@
+{
+	"luci-app-singbox": {
+		"description": "Grant access to singbox configuration",
+		"read": {
+			"uci": [ "sing-box" ],
+			"file": {
+				"/etc/sing-box/*": [ "read" ],
+				"/var/log/singbox.log": [ "read" ]
+			},
+			"ubus": {
+				"singbox": [ "test_connectivity", "get_logs", "read_config" ],
+				"service": [ "list" ],
+				"file": [ "read", "stat" ]
+			}
+		},
+		"write": {
+			"uci": [ "sing-box" ],
+			"file": {
+				"/etc/sing-box/*": [ "write" ],
+                                "/var/log/singbox.log": ["write"],
+                                "/etc/init.d/sing-box": ["exec"]
+			},
+			"ubus": {
+				"singbox": [ "test_connectivity", "get_logs", "read_config", "write_config" ],
+				"service": [ "list", "set" ],
+				"file": [ "exec", "write" ]
+			}
+		}
+	}
+}

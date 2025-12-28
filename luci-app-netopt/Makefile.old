@@ -20,13 +20,12 @@ PKG_LICENSE_FILES:=LICENSE
 LUCI_TYPE:=app
 LUCI_PKGARCH:=all
 
+include $(TOPDIR)/feeds/luci/luci.mk
 
 # Package definition
 LUCI_TITLE:=Network Optimization Interface
 LUCI_DESCRIPTION:=Complete network optimization tool with web interface
-LUCI_DEPENDS:=+ethtool
 
-include $(TOPDIR)/feeds/luci/luci.mk
 # Build/Prepare
 define Build/Prepare
 	# For all-in-one package, files are in source directory
@@ -159,4 +158,4 @@ exit 0
 endef
 
 # Call the build macro
-#$(eval $(call BuildPackage,luci-app-netopt))
+$(eval $(call BuildPackage,luci-app-netopt))

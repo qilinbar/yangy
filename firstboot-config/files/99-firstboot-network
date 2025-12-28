@@ -1,30 +1,55 @@
 #!/bin/sh
 
-FIRSTBOOT_MARKER="/etc/firstboot-done"
+LOGTAG="firstboot"
 
-# 如果已经执行过，直接退出
-[ -f "$FIRSTBOOT_MARKER" ] && {
-    echo "Firstboot network configuration already applied"
-    exit 0
-}
+echo "[$LOGTAG] applying firstboot configuration..."
 
-# 备份原配置（可选）
-cp /etc/config/network /etc/config/network.backup.firstboot
+#
+# ===== Network firstboot config =====
+#
+if uci -q get network.lan >/dev/null 2>&1; then
+	echo "[$LOGTAG] configuring network..."
 
-# 设置网络配置
-echo "Applying firstboot network configuration..."
-uci set network.lan.ipaddr='192.168.1.2'
-uci set network.lan.dns='192.168.1.1'
+	uci batch <<EOF
+set network.lan.ipaddr='192.168.1.2'
+set network.lan.netmask='255.255.255.0'
+add_list network.lan.dns='192.168.1.1'
+EOF
 
-# 提交配置
-uci commit network
+	uci commit network
+	/etc/init.d/network reload >/dev/null 2>&1
 
-# 创建标记文件
-touch "$FIRSTBOOT_MARKER"
+	logger -t "$LOGTAG" "network configured: IP=192.168.1.2 DNS=192.168.1.1"
+else
+	logger -t "$LOGTAG" "network.lan not found, skip network config"
+fi
 
-# 写入日志
-logger -t firstboot "Network configured: IP=192.168.1.2, DNS=192.168.1.1"
+#
+# ===== sing-box user fix (one-time) =====
+#
+if uci -q get sing-box.main.user >/dev/null 2>&1; then
+	CUR_USER="$(uci -q get sing-box.main.user)"
 
-echo "Firstboot network configuration completed successfully"
+	if [ "$CUR_USER" = "sing-box" ]; then
+		uci set sing-box.main.user='root'
+		uci commit sing-box
+		logger -t "$LOGTAG" "sing-box user fixed: sing-box -> root"
+	else
+		logger -t "$LOGTAG" "sing-box user already '$CUR_USER', no change"
+	fi
+else
+	logger -t "$LOGTAG" "sing-box config not found, skip user fix"
+fi
+
+#
+# ===== enable sing-box if present =====
+#
+if [ -x /etc/init.d/sing-box ]; then
+	/etc/init.d/sing-box enable
+	logger -t "$LOGTAG" "sing-box enabled"
+fi
+
+echo "[$LOGTAG] firstboot configuration completed"
 
 exit 0
+

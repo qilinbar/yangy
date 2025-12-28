@@ -1,0 +1,162 @@
+#!/bin/sh
+# OpenWrt rpcd Shell 后端 - singbox
+# 放置在: /usr/libexec/rpcd/singbox
+
+. /usr/share/libubox/jshn.sh
+
+# JSON 转义函数
+json_escape() {
+    sed 's/\\/\\\\/g; s/"/\\"/g' | awk '{printf "%s\\n", $0}' | sed 's/\\n$//'
+}
+
+# 测试 Google 连通性
+test_connectivity() {
+    local start_ms=$(date +%s%3N)
+    local http_code
+    
+    if wget -q -T 5 -O /dev/null https://www.google.com; then
+	    http_code=200
+    else
+    	    http_code=000
+    fi
+
+    
+    local end_ms=$(date +%s%3N)
+    local latency=$((end_ms - start_ms))
+    
+    json_init
+    
+    if [ "$http_code" = "200" ] || [ "$http_code" = "301" ] || [ "$http_code" = "302" ] || [ "$http_code" = "307" ]; then
+        json_add_boolean success 1
+        json_add_string latency "${latency} ms"
+        json_add_string status "Connected"
+    else
+        json_add_boolean success 0
+        json_add_string latency "N/A"
+        json_add_string status "HTTP ${http_code}"
+    fi
+    
+    json_dump
+}
+
+# 获取日志
+get_logs() {
+    local lines="${1:-50}"
+    local log_file="/var/log/singbox.log"
+    local content=""
+    
+    if [ -f "$log_file" ]; then
+        content=$(tail -n "$lines" "$log_file" 2>/dev/null | json_escape)
+        [ -z "$content" ] && content="Log file is empty"
+    else
+        content="Log file not found: $log_file"
+    fi
+    
+    json_init
+    json_add_string logs "$content"
+    json_dump
+}
+
+# 读取配置文件
+read_config() {
+    local path="${1:-/etc/sing-box/config.json}"
+    local content=""
+    local error=""
+    
+    if [ -f "$path" ]; then
+        content=$(cat "$path" | json_escape)
+        [ -z "$content" ] && content="{}"
+    else
+        content='{\n  "log": {\n    "level": "info"\n  },\n  "inbounds": [],\n  "outbounds": []\n}'
+        error="File not found, showing template"
+    fi
+    
+    json_init
+    json_add_string content "$content"
+    [ -n "$error" ] && json_add_string error "$error"
+    json_dump
+}
+
+# 写入配置文件
+write_config() {
+    local path="${1:-/etc/sing-box/config.json}"
+    local content="$2"
+    
+    if [ -z "$content" ]; then
+        json_init
+        json_add_boolean success 0
+        json_add_string error "Content is empty"
+        json_dump
+        return
+    fi
+    
+    # 验证 JSON 格式
+    if ! echo "$content" | jsonfilter -e '@' >/dev/null 2>&1; then
+        json_init
+        json_add_boolean success 0
+        json_add_string error "Invalid JSON format"
+        json_dump
+        return
+    fi
+    
+    # 创建目录
+    local dir=$(dirname "$path")
+    mkdir -p "$dir" 2>/dev/null
+    
+    # 备份原文件
+    [ -f "$path" ] && cp "$path" "${path}.bak" 2>/dev/null
+    
+    # 写入文件
+    if echo "$content" > "$path" 2>/dev/null; then
+        json_init
+        json_add_boolean success 1
+        json_dump
+    else
+        json_init
+        json_add_boolean success 0
+        json_add_string error "Failed to write file"
+        json_dump
+    fi
+}
+
+# 主函数
+case "$1" in
+    list)
+        # 列出所有可用的方法
+        echo '{"test_connectivity":{},"get_logs":{"lines":0},"read_config":{"path":""},"write_config":{"path":"","content":""}}'
+        ;;
+    call)
+        case "$2" in
+            test_connectivity)
+                test_connectivity
+                ;;
+            get_logs)
+                # 读取 JSON 输入
+                read -r input
+                lines=$(echo "$input" | jsonfilter -e '@.lines' 2>/dev/null)
+                get_logs "$lines"
+                ;;
+            read_config)
+                read -r input
+                path=$(echo "$input" | jsonfilter -e '@.path' 2>/dev/null)
+                read_config "$path"
+                ;;
+            write_config)
+                read -r input
+                path=$(echo "$input" | jsonfilter -e '@.path' 2>/dev/null)
+                content=$(echo "$input" | jsonfilter -e '@.content' 2>/dev/null)
+                write_config "$path" "$content"
+                ;;
+            *)
+                json_init
+                json_add_string error "Unknown method: $2"
+                json_dump
+                ;;
+        esac
+        ;;
+    *)
+        json_init
+        json_add_string error "Unknown command: $1"
+        json_dump
+        ;;
+esac

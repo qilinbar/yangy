@@ -1,0 +1,24 @@
+#!/bin/sh
+LOGTAG="firstboot-singbox"
+
+if uci -q get sing-box.main.user >/dev/null 2>&1; then
+    CUR_USER="$(uci -q get sing-box.main.user)"
+    if [ "$CUR_USER" = "sing-box" ]; then
+        uci set sing-box.main.user='root'
+        uci commit sing-box
+        logger -t "$LOGTAG" "sing-box user fixed: sing-box -> root"
+    else
+        logger -t "$LOGTAG" "sing-box user already '$CUR_USER', no change"
+    fi
+else
+    logger -t "$LOGTAG" "sing-box config not found, skipping"
+fi
+
+# 启用 sing-box
+if [ -x /etc/init.d/sing-box ]; then
+    /etc/init.d/sing-box enable
+    logger -t "$LOGTAG" "sing-box enabled"
+fi
+
+exit 0
+

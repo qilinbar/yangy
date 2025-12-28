@@ -1,5 +1,8 @@
-config netopt 'netopt'
-    option eee '0'
-    option rpsxps '0'
-    option interfaces 'eth1 eth2'
+
+config netopt 'config'
+	option eee '1'
+	option rpsxps '0'
+	option enable '1'
+	list interfaces 'eth1'
+	list interfaces 'eth2'
 

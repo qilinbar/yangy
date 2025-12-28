@@ -1,0 +1,191 @@
+#!/bin/sh
+# 文件路径: /usr/libexec/rpcd/netopt
+
+. /usr/share/libubox/jshn.sh
+
+# 获取所有网络接口
+get_interfaces() {
+    json_init
+    json_add_array interfaces
+    
+    for iface in /sys/class/net/*; do
+        [ -d "$iface" ] || continue
+        iface_name=$(basename "$iface")
+        json_add_string "" "$iface_name"
+    done
+    
+    json_close_array
+    json_dump
+}
+
+# 检查 EEE 支持
+check_eee_support() {
+    local iface="$1"
+    
+    if ethtool --show-eee "$iface" >/dev/null 2>&1; then
+        echo "1"
+    else
+        echo "0"
+    fi
+}
+
+# 获取接口信息
+get_interface_info() {
+    local iface="$1"
+    
+    if [ ! -d "/sys/class/net/$iface" ]; then
+        json_init
+        json_add_boolean exists 0
+        json_dump
+        return
+    fi
+    
+    local eee_support=$(check_eee_support "$iface")
+    local queues_path="/sys/class/net/$iface/queues"
+    local rx_queues=0
+    local tx_queues=0
+    
+    if [ -d "$queues_path" ]; then
+        rx_queues=$(ls -d "$queues_path"/rx-* 2>/dev/null | wc -l)
+        tx_queues=$(ls -d "$queues_path"/tx-* 2>/dev/null | wc -l)
+    fi
+    
+    json_init
+    json_add_boolean exists 1
+    json_add_string name "$iface"
+    json_add_boolean eee_support "$eee_support"
+    json_add_int rx_queues "$rx_queues"
+    json_add_int tx_queues "$tx_queues"
+    json_dump
+}
+
+# 应用网卡优化
+apply_optimization() {
+    local eee="$1"
+    local rpsxps="$2"
+    local interfaces="$3"
+    
+    # 解析接口列表
+    local iface_list=""
+    for iface in $interfaces; do
+        iface_list="$iface_list $iface"
+    done
+    
+    if [ -z "$iface_list" ]; then
+        logger -t netopt "未选择任何网卡，跳过处理"
+        json_init
+        json_add_boolean success 0
+        json_add_string error "No interfaces selected"
+        json_dump
+        return
+    fi
+    
+    local cpu_count=$(grep -c "^processor" /proc/cpuinfo)
+    [ "$cpu_count" -eq 0 ] && cpu_count=1
+    local mask=$(printf "%x" $((2**cpu_count - 1)))
+    
+    local results=""
+    
+    # 处理每个接口
+    for iface in $iface_list; do
+        if [ ! -d "/sys/class/net/$iface" ]; then
+            logger -t netopt "警告: 接口不存在: $iface"
+            continue
+        fi
+        
+        logger -t netopt "开始处理接口: $iface"
+        
+        # 处理 EEE
+        if ethtool --show-eee "$iface" >/dev/null 2>&1; then
+            if [ "$eee" = "1" ]; then
+                ethtool --set-eee "$iface" eee off 2>/dev/null
+                logger -t netopt "关闭EEE: $iface"
+                results="${results}Disabled EEE on $iface\n"
+            else
+                ethtool --set-eee "$iface" eee on 2>/dev/null
+                logger -t netopt "开启EEE: $iface"
+                results="${results}Enabled EEE on $iface\n"
+            fi
+        else
+            logger -t netopt "接口 $iface 不支持EEE"
+            results="${results}$iface does not support EEE\n"
+        fi
+        
+        # 处理 RPS/XPS
+        local queues_path="/sys/class/net/$iface/queues"
+        if [ -d "$queues_path" ]; then
+            for queue in "$queues_path"/rx-*; do
+                [ -d "$queue" ] || continue
+                queue_name=$(basename "$queue")
+                rps_file="$queue/rps_cpus"
+                
+                if [ "$rpsxps" = "1" ]; then
+                    echo "$mask" > "$rps_file" 2>/dev/null
+                    logger -t netopt "设置 $iface/$queue_name RPS -> CPU_MASK=0x$mask"
+                    results="${results}Set RPS on $iface/$queue_name to 0x$mask\n"
+                else
+                    echo "0" > "$rps_file" 2>/dev/null
+                    logger -t netopt "恢复 $iface/$queue_name RPS -> 默认"
+                    results="${results}Reset RPS on $iface/$queue_name\n"
+                fi
+            done
+            
+            for queue in "$queues_path"/tx-*; do
+                [ -d "$queue" ] || continue
+                queue_name=$(basename "$queue")
+                xps_file="$queue/xps_cpus"
+                
+                if [ "$rpsxps" = "1" ]; then
+                    echo "$mask" > "$xps_file" 2>/dev/null
+                    logger -t netopt "设置 $iface/$queue_name XPS -> CPU_MASK=0x$mask"
+                    results="${results}Set XPS on $iface/$queue_name to 0x$mask\n"
+                else
+                    echo "0" > "$xps_file" 2>/dev/null
+                    logger -t netopt "恢复 $iface/$queue_name XPS -> 默认"
+                    results="${results}Reset XPS on $iface/$queue_name\n"
+                fi
+            done
+        fi
+    done
+    
+    json_init
+    json_add_boolean success 1
+    json_add_string message "$results"
+    json_dump
+}
+
+# 主函数
+case "$1" in
+    list)
+        echo '{"get_interfaces":{},"get_interface_info":{"interface":""},"apply_optimization":{"eee":"","rpsxps":"","interfaces":""}}'
+        ;;
+    call)
+        case "$2" in
+            get_interfaces)
+                get_interfaces
+                ;;
+            get_interface_info)
+                read -r input
+                interface=$(echo "$input" | jsonfilter -e '@.interface' 2>/dev/null)
+                get_interface_info "$interface"
+                ;;
+            apply_optimization)
+                read -r input
+                eee=$(echo "$input" | jsonfilter -e '@.eee' 2>/dev/null)
+                rpsxps=$(echo "$input" | jsonfilter -e '@.rpsxps' 2>/dev/null)
+                interfaces=$(echo "$input" | jsonfilter -e '@.interfaces' 2>/dev/null)
+                apply_optimization "$eee" "$rpsxps" "$interfaces"
+                ;;
+            *)
+                json_init
+                json_add_string error "Unknown method: $2"
+                json_dump
+                ;;
+        esac
+        ;;
+    *)
+        json_init
+        json_add_string error "Unknown command: $1"
+        json_dump
+        ;;
+esac

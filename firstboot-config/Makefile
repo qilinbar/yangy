@@ -1,28 +1,29 @@
 include $(TOPDIR)/rules.mk
 
-PKG_NAME:=firstboot-config
+PKG_NAME:=firstboot-policy
 PKG_VERSION:=1.0
 PKG_RELEASE:=1
 
 include $(INCLUDE_DIR)/package.mk
 
-define Package/firstboot-config
+define Package/firstboot-policy
   SECTION:=base
   CATEGORY:=Base system
-  TITLE:=Firstboot Network Configuration
+  TITLE:=Firstboot policy package
   PKGARCH:=all
 endef
 
-define Package/firstboot-config/description
-  Set eth0 to 192.168.1.2 and DNS to 192.168.1.1 on first boot.
+define Package/firstboot-policy/description
+  Apply firstboot network, sing-box, and other policies automatically
 endef
 
 define Build/Compile
 endef
 
-define Package/firstboot-config/install
+define Package/firstboot-policy/install
 	$(INSTALL_DIR) $(1)/etc/uci-defaults
-	$(INSTALL_BIN) ./files/99-firstboot-network $(1)/etc/uci-defaults/99-firstboot-network
+	$(INSTALL_BIN) ./files/uci-defaults/* $(1)/etc/uci-defaults/
 endef
 
-$(eval $(call BuildPackage,firstboot-config))
+$(eval $(call BuildPackage,firstboot-policy))
+

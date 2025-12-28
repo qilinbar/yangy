@@ -1,0 +1,17 @@
+{
+	"luci-app-netopt": {
+		"description": "Grant access to network optimization",
+		"read": {
+			"uci": [ "netopt" ],
+			"ubus": {
+				"netopt": [ "get_interfaces", "get_interface_info" ]
+			}
+		},
+		"write": {
+			"uci": [ "netopt" ],
+			"ubus": {
+				"netopt": [ "get_interfaces", "get_interface_info", "apply_optimization" ]
+			}
+		}
+	}
+}

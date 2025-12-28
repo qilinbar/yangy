@@ -1,0 +1,20 @@
+#!/bin/sh
+LOGTAG="firstboot-others"
+
+# 添加 TCP 缓冲区和网络参数调优
+cat << EOF >> /etc/sysctl.conf
+net.core.rmem_max=16777216
+net.core.wmem_max=16777216
+net.ipv4.tcp_rmem=4096 87380 16777216
+net.ipv4.tcp_wmem=4096 65536 16777216
+net.ipv4.tcp_congestion_control=bbr
+net.ipv4.tcp_fastopen=3
+net.netfilter.nf_conntrack_max=65536
+net.netfilter.nf_conntrack_tcp_timeout_established=3600
+EOF
+
+# 应用配置
+sysctl -p
+
+logger -t "$LOGTAG" "TCP buffer and network optimizations applied"
+exit 0
